@@ -1,0 +1,18 @@
+{
+  "configurations": [
+    {
+      "name": "C: Debug with Clang",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${fileDirname}/${fileBasenameNoExtension}",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${fileDirname}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "lldb",
+      "preLaunchTask": "C: clang build active file"
+    }
+  ],
+  "version": "2.0.0"
+}

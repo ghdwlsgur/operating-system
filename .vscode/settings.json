@@ -1,0 +1,8 @@
+{
+  "clangd.arguments": [
+    "--enable-config",
+    "--compile-commands-dir=.",
+    "--query-driver=/opt/homebrew/bin/gcc-14"
+  ],
+  "clangd.onConfigChanged": "restart"
+}
