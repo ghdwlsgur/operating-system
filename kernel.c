@@ -35,7 +35,13 @@ void kernel_main(void) {
 }
 
 // boot() 함수를 섹션 (__text_boot)에 배치
+#ifdef __APPLE__
+__attribute__((section("__TEXT,__text_boot")))
+__attribute__((naked)) //--------- macOS (Mach-O) Mach Object
+#else
 __attribute__((section(".text.boot")))
+__attribute__((naked)) //--------- Linux (ELF) Executable and Linkable Format
+#endif
 // 함수 프롤로그와 에필로그를 자동으로 생성하지 않도록 설정 (어셈블리 코드 삽입)
 __attribute__((naked)) void
 boot(void) {
@@ -47,7 +53,7 @@ boot(void) {
                        : [stack_top] "r"(__stack_top));
 }
 
-/* 일
+/* 요약
 1. 부트 코드 실행 (boot()), sp를 __stack_top으로 설정, kernel_main() 함수로 점프
 2. kernel_main()에서 BSS 영역 초기화 및 무한 루프 실행
 */
