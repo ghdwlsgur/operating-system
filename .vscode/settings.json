@@ -2,7 +2,7 @@
   "clangd.arguments": [
     "--enable-config",
     "--compile-commands-dir=.",
-    "--query-driver=/opt/homebrew/bin/gcc-14"
+    "--query-driver=/opt/homebrew/bin/riscv64-unknown-elf-gcc" 
   ],
   "clangd.onConfigChanged": "restart"
 }
