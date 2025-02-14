@@ -1,0 +1,6 @@
+Diagnostics:
+  Suppress: 
+    - incompatible-library-redeclaration
+    - int-conversion
+    - unused-includes
+    - pointer-to-int-cast
