@@ -1,0 +1,32 @@
+#!/bin/bash
+
+set -xue
+
+QEMU=qemu-system-riscv32
+
+# clang 경로, 컴파일 옵션
+CC=/opt/homebrew/opt/llvm/bin/clang
+CFLAGS=(
+  -std=c11                     # C11 표준 사용
+  -O2                          # 최적화 레벨 2
+  -g3                          # 최대한의 디버그 정보 생성
+  -Wall                        # 핵심 경고 활성화
+  -Wextra                      # 추가 경고 활성화
+  --target=riscv32-unknown-elf # 32비트 RISC-V 대상 아키텍처
+  -fno-stack-protector         # 스택 보호 기능 비활성화
+  -ffreestanding               # 호스트 표준 라이브러리를 사용하지 않음
+  -nostdlib                    # 표준 라이브러리를 링크하지 않음
+)
+
+# 커널 빌드
+$CC "${CFLAGS[@]}" \
+  -Wl,-Tkernel.ld \
+  -Wl,-Map=kernel.map \
+  -o kernel.elf \
+  kernel.c
+
+# virt 머신 시작
+# QEMU가 제공하는 기본 펌웨어(OpenSBI)를 사용
+# GUI 없이 콘솔만
+$QEMU -machine virt -bios default -nographic -serial mon:stdio --no-reboot \
+  -kernel kernel.elf
