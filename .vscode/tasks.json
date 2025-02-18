@@ -11,6 +11,7 @@
         "-misa-spec=2.2",
         "-std=c17",                    
         "-g",
+        "-x", "c",
         "${file}",
         "-o",
         "${fileDirname}/${fileBasenameNoExtension}"

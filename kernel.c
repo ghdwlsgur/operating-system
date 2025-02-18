@@ -58,13 +58,13 @@ void putchar(char ch) {
   sbi_call(ch, 0, 0, 0, 0, 0, 0, 1 /* Console Putchar */);
 }
 
-// 메모리의 특정 영역을 지정된 값으로 초기화 (메모리 초기화)
-void *memset(void *buf, char c, size_t n) {
-  uint8_t *p = (uint8_t *)buf;
-  while (n--)
-    *p++ = c;
-  return buf;
-}
+// 메모리의 특정 영역을 지정된 값으로 초기화 (메모리 초기화) common.c로 이동
+// void *memset(void *buf, char c, size_t n) {
+//   uint8_t *p = (uint8_t *)buf;
+//   while (n--)
+//     *p++ = c;
+//   return buf;
+// }
 
 // 커널 메인 함수
 void kernel_main(void) {

@@ -3,17 +3,17 @@
     {
       "name": "Mac",
       "includePath": [
-        "${workspaceFolder}/**"        
+        "${workspaceFolder}/**"
       ],
       "defines": [],
       "macFrameworkPath": [],
       "compilerPath": "/opt/homebrew/bin/riscv64-unknown-elf-gcc",
       "cStandard": "c17",
       "cppStandard": "c++20",
-      "intelliSenseMode": "macos-clang-arm64",
+      "intelliSenseMode": "linux-gcc-x64", 
       "compilerArgs": [
-          "-march=rv64gc",
-          "-mabi=lp64d"
+        "-march=rv64gc",
+        "-mabi=lp64d"
       ]
     }
   ],
