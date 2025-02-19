@@ -5,6 +5,27 @@ typedef unsigned char uint8_t; // 0 ~ 2^8-1 (255)
 typedef unsigned int uint32_t; // 0 ~ 2^32-1
 typedef uint32_t size_t;
 
+extern char __free_ram[], __free_ram_end[];
+
+/** Bump Allocator / Linear Allocator
+ * @brief  메모리 할당 함수, (메모리 해제 기능 없음)
+ *
+ * @param n 할당할 페이지 수
+ * @return paddr_t 할당된 메모리 주소
+ */
+paddr_t alloc_pages(uint32_t n) {
+  static paddr_t next_paddr = (paddr_t)__free_ram;
+  paddr_t paddr = next_paddr;
+  // 링커 스크립트에서 ALIGN(4096)으로 정렬되어 있음
+  next_paddr += n * PAGE_SIZE;
+
+  if (next_paddr > (paddr_t)__free_ram_end)
+    PANIC("out of memory");
+
+  memset((void *)paddr, 0, n * PAGE_SIZE);
+  return paddr;
+}
+
 /* 외부 심볼 선언
  * __bss ~ __bss_end: 초기화되지 않은 전역 변수가 저장될 메모리 영역
  * __stack_top: 스택의 최상단 주소
@@ -159,6 +180,11 @@ void kernel_main(void) {
    * 하려면 수동으로 초기화 하는 것이 안전 */
   memset(__bss, 0, (size_t)__bss_end - (size_t)__bss);
 
+  paddr_t paddr0 = alloc_pages(2);
+  paddr_t paddr1 = alloc_pages(1);
+  printf("alloc_pages test: paddr0=%x\n", paddr0);
+  printf("alloc_pages test: paddr1=%x\n", paddr1);
+
   /*
    * 1. stvec 레지스터에 kernel_entry 함수의 주소(예외 핸들러)를 저장
    * 2. unimp 명령어 실행
@@ -196,13 +222,7 @@ void kernel_main(void) {
 }
 
 // boot() 함수를 섹션 (__text_boot)에 배치
-#ifdef __APPLE__
-__attribute__((section("__TEXT,__text_boot")))
-__attribute__((naked)) //--------- macOS (Mach-O) Mach Object
-#else
-__attribute__((section(".text.boot")))
-__attribute__((naked)) //--------- Linux (ELF) Executable and Linkable Format
-#endif
+__attribute__((section(".text.boot"))) __attribute__((naked))
 // 함수 프롤로그와 에필로그를 자동으로 생성하지 않도록 설정 (어셈블리 코드 삽입)
 __attribute__((naked)) void
 boot(void) {
