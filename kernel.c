@@ -58,13 +58,96 @@ void putchar(char ch) {
   sbi_call(ch, 0, 0, 0, 0, 0, 0, 1 /* Console Putchar */);
 }
 
-// 메모리의 특정 영역을 지정된 값으로 초기화 (메모리 초기화) common.c로 이동
-// void *memset(void *buf, char c, size_t n) {
-//   uint8_t *p = (uint8_t *)buf;
-//   while (n--)
-//     *p++ = c;
-//   return buf;
-// }
+void handle_trap(struct trap_frame *f) {
+  uint32_t scause = READ_CSR(scause); // 어떤 이유로 예외가 발생했는지
+  uint32_t stval = READ_CSR(stval);   // 예외 부가정보 (잘못된 메모리 주소...)
+  uint32_t user_pc = READ_CSR(sepc);  // 예외가 일어난 시점의 PC
+
+  PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval,
+        user_pc);
+}
+
+/**
+ * @brief 예외 처리 핸들러
+ * 1. 현재 실행 컨텍스트를 모두 저장
+ * 2. 예외 처리 함수 실행
+ * 3. 원래 컨텍스트 복원
+ * 4. 프로그램 재개
+ */
+__attribute__((naked)) __attribute__((aligned(4))) void kernel_entry(void) {
+  __asm__ __volatile__(
+      "csrw sscratch, sp\n"    // 현재 스택 포인터를 sscratch CSR에 저장
+      "addi sp, sp, -4 * 31\n" // 스택에 31개 레지스터를 저장할 공간 확보
+      "sw ra,  4 * 0(sp)\n"    // 리턴 주소 저장
+      "sw gp,  4 * 1(sp)\n"    // 전역 포인터 저장
+      "sw tp,  4 * 2(sp)\n"    // 스레드 포인터 저장
+      "sw t0,  4 * 3(sp)\n"    // =================== t0 ~ t6 (임시 레지스터)
+      "sw t1,  4 * 4(sp)\n"
+      "sw t2,  4 * 5(sp)\n"
+      "sw t3,  4 * 6(sp)\n"
+      "sw t4,  4 * 7(sp)\n"
+      "sw t5,  4 * 8(sp)\n"
+      "sw t6,  4 * 9(sp)\n"
+      "sw a0,  4 * 10(sp)\n" // ================== a0 ~ a7 (인자 레지스터)
+      "sw a1,  4 * 11(sp)\n"
+      "sw a2,  4 * 12(sp)\n"
+      "sw a3,  4 * 13(sp)\n"
+      "sw a4,  4 * 14(sp)\n"
+      "sw a5,  4 * 15(sp)\n"
+      "sw a6,  4 * 16(sp)\n"
+      "sw a7,  4 * 17(sp)\n"
+      "sw s0,  4 * 18(sp)\n" // ================== s0 ~ s11 (저장 레지스터)
+      "sw s1,  4 * 19(sp)\n"
+      "sw s2,  4 * 20(sp)\n"
+      "sw s3,  4 * 21(sp)\n"
+      "sw s4,  4 * 22(sp)\n"
+      "sw s5,  4 * 23(sp)\n"
+      "sw s6,  4 * 24(sp)\n"
+      "sw s7,  4 * 25(sp)\n"
+      "sw s8,  4 * 26(sp)\n"
+      "sw s9,  4 * 27(sp)\n"
+      "sw s10, 4 * 28(sp)\n"
+      "sw s11, 4 * 29(sp)\n"
+
+      "csrr a0, sscratch\n" // sscratch에서 원래 sp 값 읽기
+      "sw a0, 4 * 30(sp)\n" // 스택에 저장
+
+      "mv a0, sp\n"        // 현재 스택 포인터를 인자로 전달
+      "call handle_trap\n" // ! 실제 예외 처리 함수 호출
+
+      "lw ra,  4 * 0(sp)\n" // 리턴 주소 복원
+      "lw gp,  4 * 1(sp)\n" // 전역 포인터 복원
+      "lw tp,  4 * 2(sp)\n"
+      "lw t0,  4 * 3(sp)\n"
+      "lw t1,  4 * 4(sp)\n"
+      "lw t2,  4 * 5(sp)\n"
+      "lw t3,  4 * 6(sp)\n"
+      "lw t4,  4 * 7(sp)\n"
+      "lw t5,  4 * 8(sp)\n"
+      "lw t6,  4 * 9(sp)\n"
+      "lw a0,  4 * 10(sp)\n"
+      "lw a1,  4 * 11(sp)\n"
+      "lw a2,  4 * 12(sp)\n"
+      "lw a3,  4 * 13(sp)\n"
+      "lw a4,  4 * 14(sp)\n"
+      "lw a5,  4 * 15(sp)\n"
+      "lw a6,  4 * 16(sp)\n"
+      "lw a7,  4 * 17(sp)\n"
+      "lw s0,  4 * 18(sp)\n"
+      "lw s1,  4 * 19(sp)\n"
+      "lw s2,  4 * 20(sp)\n"
+      "lw s3,  4 * 21(sp)\n"
+      "lw s4,  4 * 22(sp)\n"
+      "lw s5,  4 * 23(sp)\n"
+      "lw s6,  4 * 24(sp)\n"
+      "lw s7,  4 * 25(sp)\n"
+      "lw s8,  4 * 26(sp)\n"
+      "lw s9,  4 * 27(sp)\n"
+      "lw s10, 4 * 28(sp)\n"
+      "lw s11, 4 * 29(sp)\n"
+      "lw sp,  4 * 30(sp)\n" // 원래 스택 포인터 복원
+      "sret\n");             // 예외 처리 완료, 원래 실행 지점으로 복귀
+}
 
 // 커널 메인 함수
 void kernel_main(void) {
@@ -76,8 +159,20 @@ void kernel_main(void) {
    * 하려면 수동으로 초기화 하는 것이 안전 */
   memset(__bss, 0, (size_t)__bss_end - (size_t)__bss);
 
-  /* Hello World 메시지가 화면에 출력되는 과정
-  SBI 호출 시, 문자는 다음과 같이 표시
+  /*
+   * 1. stvec 레지스터에 kernel_entry 함수의 주소(예외 핸들러)를 저장
+   * 2. unimp 명령어 실행
+   * 3. 예외 발생
+   * 4. CPU가 stvec에 저장된 주소(kernel_entry)로 점프하여 예외 핸들러 실행
+   * 5. 예외 처리 시작
+   */
+  WRITE_CSR(stvec, (uint32_t)kernel_entry);
+  __asm__ __volatile__("unimp"); // unimplemented instruction
+
+  /*
+    Hello World 메시지가 화면에 출력되는 과정 SBI 호출 시, 문자는 다음과 같이
+  표시
+
   * 1. 커널에서 ecall 명령어 실행, CPU는 OpenSBI가 부팅 시점에 설정해둔 M-Mode
   트랩 핸들러(mtvec 레지스터)로 점프
   * 2. 레지스터를 저장한 뒤, C로 작성된 트랩 핸들러 호출
