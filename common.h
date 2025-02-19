@@ -12,6 +12,7 @@ typedef uint32_t paddr_t;
 // 가상 메모리 주소를 나타내는 타입 (virtual memory address)
 typedef uint32_t vaddr_t;
 
+#define PAGE_SIZE 4096
 #define true 1
 #define false 0
 #define NULL ((void *)0) // NULL을 void 포인터의 0으로 설정
