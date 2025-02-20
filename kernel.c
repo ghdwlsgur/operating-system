@@ -5,6 +5,68 @@ typedef unsigned char uint8_t; // 0 ~ 2^8-1 (255)
 typedef unsigned int uint32_t; // 0 ~ 2^32-1
 typedef uint32_t size_t;
 
+#define PROCS_MAX 8     // 최대 프로세스 개수
+#define PROC_UNUSED 0   // 사용되지 않는 프로세스 구조체
+#define PROC_RUNNABLE 1 // 실행 가능한 프로세스
+
+struct process {
+  int pid;             // 프로세스 ID
+  int state;           // 프로세스 상태: PROC_UNUSED 또는 PROC_RUNNABLE
+  vaddr_t sp;          // 스택 포인터
+  uint8_t stack[8192]; // 커널 스택 (CPU 레지스터, 함수 리턴 주소, 로컬 변수)
+};
+
+struct process procs[PROCS_MAX]; // 모든 프로세스 제어 구조체 배열
+struct process *current_proc;    // 현재 실행 중인 프로세스
+struct process *idle_proc;       // Idle 프로세스
+
+/**
+ * @brief 프로세스 생성
+ *
+ * @param pc 프로세스가 처음 실행할 주소
+ * @return struct process*  생성된 프로세스 구조체의 주소
+ */
+struct process *create_process(uint32_t pc) {
+  // 미사용 상태의 프로세스 구조체 찾기
+  struct process *proc = NULL;
+  int i;
+  for (i = 0; i < PROCS_MAX; i++) {
+    // procs 배열에서 UNUSED 상태인 슬롯의 주소를 proc에 저장
+    if (procs[i].state == PROC_UNUSED) {
+      proc = &procs[i];
+      break;
+    }
+  }
+
+  if (!proc)
+    PANIC("no free process slots");
+
+  // 커널 스택 초기화, 스택의 최상단(가장 높은 주소)부터 시작
+  uint32_t *sp = (uint32_t *)&proc->stack[sizeof(proc->stack)];
+
+  // 커널 스택에 callee-saved 레지스터 공간을 미리 준비
+  // 첫 컨텍스트 스위치 시, switch_context에서 이 값들을 복원
+  *--sp = 0;            // s11
+  *--sp = 0;            // s10
+  *--sp = 0;            // s9
+  *--sp = 0;            // s8
+  *--sp = 0;            // s7
+  *--sp = 0;            // s6
+  *--sp = 0;            // s5
+  *--sp = 0;            // s4
+  *--sp = 0;            // s3
+  *--sp = 0;            // s2
+  *--sp = 0;            // s1
+  *--sp = 0;            // s0
+  *--sp = (uint32_t)pc; // ra (처음 실행 시 점프할 주소)
+
+  // 구조체 필드 초기화
+  proc->pid = i + 1;
+  proc->state = PROC_RUNNABLE;
+  proc->sp = (uint32_t)sp;
+  return proc;
+}
+
 extern char __free_ram[], __free_ram_end[];
 
 /** Bump Allocator / Linear Allocator
@@ -89,6 +151,91 @@ void handle_trap(struct trap_frame *f) {
 }
 
 /**
+ * @brief 프로세스 간 컨텍스트 스위치 수행
+ * called-saved 레지스터(ra, sp, s0-s11)만 저장/복원하여 성능 최적화
+ *
+ * @param prev_sp 이전 프로세스의 스택 포인터 (a0 레지스터)
+ * @param next_sp 다음 프로세스의 스택 포인터 (a1 레지스터)
+ */
+__attribute__((naked)) void switch_context(uint32_t *prev_sp,
+                                           uint32_t *next_sp) {
+
+  __asm__ __volatile__(
+      //=========================================================
+      // 1. 현재 프로세스의 스택에 callee-saved 레지스터를 저장
+      "addi sp, sp, -13 * 4\n" // 13개(4바이트씩), 52B 레지스터 공간 확보
+      "sw ra,  0  * 4(sp)\n"   // callee-saved 레지스터만 저장
+      "sw s0,  1  * 4(sp)\n"
+      "sw s1,  2  * 4(sp)\n"
+      "sw s2,  3  * 4(sp)\n"
+      "sw s3,  4  * 4(sp)\n"
+      "sw s4,  5  * 4(sp)\n"
+      "sw s5,  6  * 4(sp)\n"
+      "sw s6,  7  * 4(sp)\n"
+      "sw s7,  8  * 4(sp)\n"
+      "sw s8,  9  * 4(sp)\n"
+      "sw s9,  10 * 4(sp)\n"
+      "sw s10, 11 * 4(sp)\n"
+      "sw s11, 12 * 4(sp)\n"
+
+      //=========================================================
+      // 2. 스택 포인터 교체
+      "sw sp, (a0)\n" // *prev_sp = sp, 현재 스택 포인터를 prev_sp에 저장
+      "lw sp, (a1)\n" // sp를 다음 프로세스의 값으로 변경
+
+      //=========================================================
+      // 3. 다음 프로세스 스택에서 callee-saved 레지스터 복원
+      "lw ra,  0  * 4(sp)\n" // 저장해둔 반환 주소 복원
+      "lw s0,  1  * 4(sp)\n" // s0 ~ s11 레지스터 복원
+      "lw s1,  2  * 4(sp)\n"
+      "lw s2,  3  * 4(sp)\n"
+      "lw s3,  4  * 4(sp)\n"
+      "lw s4,  5  * 4(sp)\n"
+      "lw s5,  6  * 4(sp)\n"
+      "lw s6,  7  * 4(sp)\n"
+      "lw s7,  8  * 4(sp)\n"
+      "lw s8,  9  * 4(sp)\n"
+      "lw s9,  10 * 4(sp)\n"
+      "lw s10, 11 * 4(sp)\n"
+      "lw s11, 12 * 4(sp)\n"
+      "addi sp, sp, 13 * 4\n" // 스택 포인터 복원 후, 스택 포인터 복귀
+      "ret\n");               // 복원된 ra 주소로 반환
+}
+
+/**
+ * @brief 라운드 로빈 방식의 스케줄러 (순차적)
+ * 프로세스들이 자발적으로 CPU를 양보
+ * 우선순위나 실행 시간은 고려 x
+ */
+void yield(void) {
+  // 실행 가능한 프로세스 탐색
+  struct process *next = idle_proc;
+  for (int i = 0; i < PROCS_MAX; i++) {
+    struct process *proc = &procs[(current_proc->pid + i) % PROCS_MAX];
+    if (proc->state == PROC_RUNNABLE && proc->pid > 0) {
+      next = proc;
+      break;
+    }
+  }
+
+  // 현재 프로세스를 제외하고 실행 가능한 프로세스가 없다면 리턴
+  if (next == current_proc)
+    return;
+
+  // 다음 프로세스의 스택 포인터를 sscratch CSR에 저장
+  // 나중에 예외가 발생했을 때, 커널이 이 스택을 사용하여 컨텍스트 복원
+  __asm__ __volatile__(
+      "csrw sscratch, %[sscratch]\n"
+      :
+      : [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
+
+  // 컨텍스트 스위칭
+  struct process *prev = current_proc;
+  current_proc = next;
+  switch_context(&prev->sp, &next->sp);
+}
+
+/**
  * @brief 예외 처리 핸들러
  * 1. 현재 실행 컨텍스트를 모두 저장
  * 2. 예외 처리 함수 실행
@@ -97,12 +244,14 @@ void handle_trap(struct trap_frame *f) {
  */
 __attribute__((naked)) __attribute__((aligned(4))) void kernel_entry(void) {
   __asm__ __volatile__(
-      "csrw sscratch, sp\n"    // 현재 스택 포인터를 sscratch CSR에 저장
-      "addi sp, sp, -4 * 31\n" // 스택에 31개 레지스터를 저장할 공간 확보
-      "sw ra,  4 * 0(sp)\n"    // 리턴 주소 저장
-      "sw gp,  4 * 1(sp)\n"    // 전역 포인터 저장
-      "sw tp,  4 * 2(sp)\n"    // 스레드 포인터 저장
-      "sw t0,  4 * 3(sp)\n"    // =================== t0 ~ t6 (임시 레지스터)
+      "csrw sp, sscratch, sp\n" // sscratch와 sp 레지스터 값을 서로 교환,
+                                // sscratch로부터 커널 스택의 실행 중인
+                                // 프로세스를 복원
+      "addi sp, sp, -4 * 31\n"  // 스택에 31개 레지스터를 저장할 공간 확보
+      "sw ra,  4 * 0(sp)\n"     // 리턴 주소 저장
+      "sw gp,  4 * 1(sp)\n"     // 전역 포인터 저장
+      "sw tp,  4 * 2(sp)\n"     // 스레드 포인터 저장
+      "sw t0,  4 * 3(sp)\n"     // =================== t0 ~ t6 (임시 레지스터)
       "sw t1,  4 * 4(sp)\n"
       "sw t2,  4 * 5(sp)\n"
       "sw t3,  4 * 6(sp)\n"
@@ -130,8 +279,15 @@ __attribute__((naked)) __attribute__((aligned(4))) void kernel_entry(void) {
       "sw s10, 4 * 28(sp)\n"
       "sw s11, 4 * 29(sp)\n"
 
+      //===================================================================
+      // 기존 스택 포인터를 보관하고 예외 처리를 위한 새로운 스택 영역을 설정
       "csrr a0, sscratch\n" // sscratch에서 원래 sp 값 읽기
       "sw a0, 4 * 30(sp)\n" // 스택에 저장
+
+      "addi a0, sp, 4 * 31\n" // 현재 sp에 124(31*4)을 더한 주소를 a0에 저장
+      "csrw sscratch, a0\n"   // 계산된 새 스택 포인터 값(a0)을 sscratch
+                              // 레지스터에 저장, 다음 예외 발생 시 사용할 스택
+                              // 포인터 준비
 
       "mv a0, sp\n"        // 현재 스택 포인터를 인자로 전달
       "call handle_trap\n" // ! 실제 예외 처리 함수 호출
@@ -170,20 +326,38 @@ __attribute__((naked)) __attribute__((aligned(4))) void kernel_entry(void) {
       "sret\n");             // 예외 처리 완료, 원래 실행 지점으로 복귀
 }
 
+void delay(void) {
+  for (int i = 0; i < 30000000; i++)
+    __asm__ __volatile__("nop"); // do nothing
+}
+
+struct process *proc_a;
+struct process *proc_b;
+
+void proc_a_entry(void) {
+  printf("starting process A\n");
+  while (1) {
+    putchar('A');
+    yield();
+  }
+}
+
+void proc_b_entry(void) {
+  printf("starting process B\n");
+  while (1) {
+    putchar('B');
+    yield();
+  }
+}
+
 // 커널 메인 함수
 void kernel_main(void) {
-  printf("\n\nHello %s\n", "World!");
-  printf("1 + 2 = %d, %x\n", 1 + 2, 0x1234abcd);
-
   /* BSS 영역 초기화 (BSS 영역만큼 버퍼를 0으로 채움)
    * 일부 부트로더가 .bss를 클리어해주기도 하지만 여러 환경에서 확실히 동작하게
    * 하려면 수동으로 초기화 하는 것이 안전 */
   memset(__bss, 0, (size_t)__bss_end - (size_t)__bss);
 
-  paddr_t paddr0 = alloc_pages(2);
-  paddr_t paddr1 = alloc_pages(1);
-  printf("alloc_pages test: paddr0=%x\n", paddr0);
-  printf("alloc_pages test: paddr1=%x\n", paddr1);
+  printf("\n\n");
 
   /*
    * 1. stvec 레지스터에 kernel_entry 함수의 주소(예외 핸들러)를 저장
@@ -193,7 +367,16 @@ void kernel_main(void) {
    * 5. 예외 처리 시작
    */
   WRITE_CSR(stvec, (uint32_t)kernel_entry);
-  __asm__ __volatile__("unimp"); // unimplemented instruction
+
+  idle_proc = create_process((uint32_t)NULL);
+  idle_proc->pid = 0; // idle
+  current_proc = idle_proc;
+
+  proc_a = create_process((uint32_t)proc_a_entry);
+  proc_b = create_process((uint32_t)proc_b_entry);
+
+  yield();
+  PANIC("switched to idle process");
 
   /*
     Hello World 메시지가 화면에 출력되는 과정 SBI 호출 시, 문자는 다음과 같이
