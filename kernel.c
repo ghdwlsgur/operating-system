@@ -222,6 +222,13 @@ void yield(void) {
   if (next == current_proc)
     return;
 
+  // 다음 프로세스의 스택 포인터를 sscratch CSR에 저장
+  // 나중에 예외가 발생했을 때, 커널이 이 스택을 사용하여 컨텍스트 복원
+  __asm__ __volatile__(
+      "csrw sscratch, %[sscratch]\n"
+      :
+      : [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
+
   // 컨텍스트 스위칭
   struct process *prev = current_proc;
   current_proc = next;
@@ -237,12 +244,14 @@ void yield(void) {
  */
 __attribute__((naked)) __attribute__((aligned(4))) void kernel_entry(void) {
   __asm__ __volatile__(
-      "csrw sscratch, sp\n"    // 현재 스택 포인터를 sscratch CSR에 저장
-      "addi sp, sp, -4 * 31\n" // 스택에 31개 레지스터를 저장할 공간 확보
-      "sw ra,  4 * 0(sp)\n"    // 리턴 주소 저장
-      "sw gp,  4 * 1(sp)\n"    // 전역 포인터 저장
-      "sw tp,  4 * 2(sp)\n"    // 스레드 포인터 저장
-      "sw t0,  4 * 3(sp)\n"    // =================== t0 ~ t6 (임시 레지스터)
+      "csrw sp, sscratch, sp\n" // sscratch와 sp 레지스터 값을 서로 교환,
+                                // sscratch로부터 커널 스택의 실행 중인
+                                // 프로세스를 복원
+      "addi sp, sp, -4 * 31\n"  // 스택에 31개 레지스터를 저장할 공간 확보
+      "sw ra,  4 * 0(sp)\n"     // 리턴 주소 저장
+      "sw gp,  4 * 1(sp)\n"     // 전역 포인터 저장
+      "sw tp,  4 * 2(sp)\n"     // 스레드 포인터 저장
+      "sw t0,  4 * 3(sp)\n"     // =================== t0 ~ t6 (임시 레지스터)
       "sw t1,  4 * 4(sp)\n"
       "sw t2,  4 * 5(sp)\n"
       "sw t3,  4 * 6(sp)\n"
@@ -270,8 +279,15 @@ __attribute__((naked)) __attribute__((aligned(4))) void kernel_entry(void) {
       "sw s10, 4 * 28(sp)\n"
       "sw s11, 4 * 29(sp)\n"
 
+      //===================================================================
+      // 기존 스택 포인터를 보관하고 예외 처리를 위한 새로운 스택 영역을 설정
       "csrr a0, sscratch\n" // sscratch에서 원래 sp 값 읽기
       "sw a0, 4 * 30(sp)\n" // 스택에 저장
+
+      "addi a0, sp, 4 * 31\n" // 현재 sp에 124(31*4)을 더한 주소를 a0에 저장
+      "csrw sscratch, a0\n"   // 계산된 새 스택 포인터 값(a0)을 sscratch
+                              // 레지스터에 저장, 다음 예외 발생 시 사용할 스택
+                              // 포인터 준비
 
       "mv a0, sp\n"        // 현재 스택 포인터를 인자로 전달
       "call handle_trap\n" // ! 실제 예외 처리 함수 호출
