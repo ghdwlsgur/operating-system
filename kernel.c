@@ -16,8 +16,50 @@ struct process {
   uint8_t stack[8192]; // 커널 스택 (CPU 레지스터, 함수 리턴 주소, 로컬 변수)
 }
 
-extern char __free_ram[],
-    __free_ram_end[];
+struct process procs[PROCS_MAX]; // 모든 프로세스 제어 구조체 배열
+
+struct process *create_process(uint32_t pc) {
+  // 미사용 상태의 프로세스 구조체 찾기
+  struct process *proc = NULL;
+  int i;
+  for (i = 0; i < PROCS_MAX; i++) {
+    // procs 배열에서 UNUSED 상태인 슬롯의 주소를 proc에 저장
+    if (procs[i].state == PROC_UNUSED) {
+      proc = &procs[i];
+      break;
+    }
+  }
+
+  if (!proc)
+    PANIC("no free process slots");
+
+  // 커널 스택 초기화, 스택의 최상단(가장 높은 주소)부터 시작
+  uint32_t *sp = (uint32_t *)&proc->stack[sizeof(proc->stack)];
+
+  // 커널 스택에 callee-saved 레지스터 공간을 미리 준비
+  // 첫 컨텍스트 스위치 시, switch_context에서 이 값들을 복원
+  *--sp = 0;            // s11
+  *--sp = 0;            // s10
+  *--sp = 0;            // s9
+  *--sp = 0;            // s8
+  *--sp = 0;            // s7
+  *--sp = 0;            // s6
+  *--sp = 0;            // s5
+  *--sp = 0;            // s4
+  *--sp = 0;            // s3
+  *--sp = 0;            // s2
+  *--sp = 0;            // s1
+  *--sp = 0;            // s0
+  *--sp = (uint32_t)pc; // ra (처음 실행 시 점프할 주소)
+
+  // 구조체 필드 초기화
+  proc->pid = i + 1;
+  proc->state = PROC_RUNNABLE;
+  proc->sp = (uint32_t)sp;
+  return proc;
+}
+
+extern char __free_ram[], __free_ram_end[];
 
 /** Bump Allocator / Linear Allocator
  * @brief  메모리 할당 함수, (메모리 해제 기능 없음)
