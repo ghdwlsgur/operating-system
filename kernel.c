@@ -5,7 +5,19 @@ typedef unsigned char uint8_t; // 0 ~ 2^8-1 (255)
 typedef unsigned int uint32_t; // 0 ~ 2^32-1
 typedef uint32_t size_t;
 
-extern char __free_ram[], __free_ram_end[];
+#define PROCS_MAX 8     // 최대 프로세스 개수
+#define PROC_UNUSED 0   // 사용되지 않는 프로세스 구조체
+#define PROC_RUNNABLE 1 // 실행 가능한 프로세스
+
+struct process {
+  int pid;             // 프로세스 ID
+  int state;           // 프로세스 상태: PROC_UNUSED 또는 PROC_RUNNABLE
+  vaddr_t sp;          // 스택 포인터
+  uint8_t stack[8192]; // 커널 스택 (CPU 레지스터, 함수 리턴 주소, 로컬 변수)
+}
+
+extern char __free_ram[],
+    __free_ram_end[];
 
 /** Bump Allocator / Linear Allocator
  * @brief  메모리 할당 함수, (메모리 해제 기능 없음)
@@ -86,6 +98,58 @@ void handle_trap(struct trap_frame *f) {
 
   PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval,
         user_pc);
+}
+
+/**
+ * @brief 프로세스 간 컨텍스트 스위치 수행
+ * called-saved 레지스터(ra, sp, s0-s11)만 저장/복원하여 성능 최적화
+ *
+ * @param prev_sp 이전 프로세스의 스택 포인터 (a0 레지스터)
+ * @param next_sp 다음 프로세스의 스택 포인터 (a1 레지스터)
+ */
+__attribute__((naked)) void switch_context(uint32_t *prev_sp,
+                                           uint32_t *next_sp) {
+
+  __asm__ __volatile__(
+      //=========================================================
+      // 1. 현재 프로세스의 스택에 callee-saved 레지스터를 저장
+      "addi sp, sp, -13 * 4\n" // 13개(4바이트씩), 52B 레지스터 공간 확보
+      "sw ra,  0  * 4(sp)\n"   // callee-saved 레지스터만 저장
+      "sw s0,  1  * 4(sp)\n"
+      "sw s1,  2  * 4(sp)\n"
+      "sw s2,  3  * 4(sp)\n"
+      "sw s3,  4  * 4(sp)\n"
+      "sw s4,  5  * 4(sp)\n"
+      "sw s5,  6  * 4(sp)\n"
+      "sw s6,  7  * 4(sp)\n"
+      "sw s7,  8  * 4(sp)\n"
+      "sw s8,  9  * 4(sp)\n"
+      "sw s9,  10 * 4(sp)\n"
+      "sw s10, 11 * 4(sp)\n"
+      "sw s11, 12 * 4(sp)\n"
+
+      //=========================================================
+      // 2. 스택 포인터 교체
+      "sw sp, (a0)\n" // *prev_sp = sp, 현재 스택 포인터를 prev_sp에 저장
+      "lw sp, (a1)\n" // sp를 다음 프로세스의 값으로 변경
+
+      //=========================================================
+      // 3. 다음 프로세스 스택에서 callee-saved 레지스터 복원
+      "lw ra,  0  * 4(sp)\n" // 저장해둔 반환 주소 복원
+      "lw s0,  1  * 4(sp)\n" // s0 ~ s11 레지스터 복원
+      "lw s1,  2  * 4(sp)\n"
+      "lw s2,  3  * 4(sp)\n"
+      "lw s3,  4  * 4(sp)\n"
+      "lw s4,  5  * 4(sp)\n"
+      "lw s5,  6  * 4(sp)\n"
+      "lw s6,  7  * 4(sp)\n"
+      "lw s7,  8  * 4(sp)\n"
+      "lw s8,  9  * 4(sp)\n"
+      "lw s9,  10 * 4(sp)\n"
+      "lw s10, 11 * 4(sp)\n"
+      "lw s11, 12 * 4(sp)\n"
+      "addi sp, sp, 13 * 4\n" // 스택 포인터 복원 후, 스택 포인터 복귀
+      "ret\n");               // 복원된 ra 주소로 반환
 }
 
 /**
