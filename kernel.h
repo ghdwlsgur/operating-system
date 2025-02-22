@@ -1,6 +1,14 @@
 #pragma once
 #include "common.h"
 
+// Sv32 방식의 페이지 테이블
+#define SATP_SV32 (1u << 31) // Sv32 모드 페이징 활성화
+#define PAGE_V (1 << 0)      // "Valid" 비트 (엔트리가 유효함을 의미)
+#define PAGE_R (1 << 1)      // 읽기 가능
+#define PAGE_W (1 << 2)      // 쓰기 가능
+#define PAGE_X (1 << 3)      // 실행 가능
+#define PAGE_U (1 << 4)      // 사용자 모드 접근 가능
+
 /**
  * @brief 예외 처리 시 저장된 레지스터들의 구조체 정의
  * ra, 리턴 주소
