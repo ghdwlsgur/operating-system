@@ -9,13 +9,6 @@ typedef uint32_t size_t;
 #define PROC_UNUSED 0   // 사용되지 않는 프로세스 구조체
 #define PROC_RUNNABLE 1 // 실행 가능한 프로세스
 
-struct process {
-  int pid;             // 프로세스 ID
-  int state;           // 프로세스 상태: PROC_UNUSED 또는 PROC_RUNNABLE
-  vaddr_t sp;          // 스택 포인터
-  uint8_t stack[8192]; // 커널 스택 (CPU 레지스터, 함수 리턴 주소, 로컬 변수)
-};
-
 struct process procs[PROCS_MAX]; // 모든 프로세스 제어 구조체 배열
 struct process *current_proc;    // 현재 실행 중인 프로세스
 struct process *idle_proc;       // Idle 프로세스
