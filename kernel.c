@@ -236,6 +236,48 @@ void yield(void) {
 }
 
 /**
+ * @brief 가상주소를 물리주소로 매핑하는 페이지 테이블 엔트리를 설정
+ *
+ * table1 (1단계 페이지 테이블)
+ * - 각 엔트리는 2단계 페이지 테이블의 물리 주소와 플래그를 포함
+ *
+ * table0 (2단계 페이지 테이블)
+ * - 각 엔트리는 물리 주소와 플래그를 포함
+ *
+ * @param table1 1단계 페이지 테이블의 포인터
+ * @param vaddr 매핑할 가상 주소
+ * @param paddr 매핑할 물리 주소
+ * @param flags 페이지 속성 플래그
+ */
+void map_page(uint32_t *table1, uint32_t vaddr, paddr_t paddr, uint32_t flags) {
+  // 주소 정렬 검사, 각 주소가 페이지 크기에 맞게 정렬되어 있는지 확인
+  if (!is_aligned(vaddr, PAGE_SIZE))
+    PANIC("unaligned vaddr %x", vaddr);
+  if (!is_aligned(paddr, PAGE_SIZE))
+    PANIC("unaligned paddr %x", paddr);
+
+  // 1단계 페이지 테이블 인덱스 계산 (오른쪽으로 22칸 시프트, 상위 10비트)
+  uint32_t vpn1 = (vaddr >> 22) & 0x3ff;
+
+  // 2단계 페이지 테이블 생성 확인 (지연 할당, 요구 페이징)
+  // 처음부터 모든 주소에 대해 2단계 테이블을 만들면 메모리가 낭비
+  // 필요할 때만 2단계 테이블을 생성하여 메모리를 절약
+  if ((table1[vpn1] & PAGE_V) == 0) {
+    // 2단계 페이지 테이블을 위한 물리 메모리 할당
+    uint32_t pt_paddr = alloc_pages(1);
+    // 물리 페이지 번호 (PPN)과 플래그를 설정하여 1단계 페이지 테이블에 매핑
+    table1[vpn1] = ((pt_paddr / PAGE_SIZE) << 10) | PAGE_V;
+  }
+
+  // 중간 10비트를 추출하여 2단계 페이지 테이블의 인덱스로 사용
+  uint32_t vpn0 = (vaddr >> 12) & 0x3ff;
+  // 가상 주소의 중간 10비트를 추출하여 2단계 페이지 테이블의 인덱스로 사용
+  uint32_t *table0 = (uint32_t *)((table1[vpn1] >> 10) * PAGE_SIZE);
+  // 물리 주소와 플래그를 설정하여 최종 매핑
+  table0[vpn0] = ((paddr / PAGE_SIZE) << 10) | flags | PAGE_V;
+}
+
+/**
  * @brief 예외 처리 핸들러
  * 1. 현재 실행 컨텍스트를 모두 저장
  * 2. 예외 처리 함수 실행
