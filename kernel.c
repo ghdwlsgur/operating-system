@@ -9,16 +9,73 @@ typedef uint32_t size_t;
 #define PROC_UNUSED 0   // 사용되지 않는 프로세스 구조체
 #define PROC_RUNNABLE 1 // 실행 가능한 프로세스
 
-struct process {
-  int pid;             // 프로세스 ID
-  int state;           // 프로세스 상태: PROC_UNUSED 또는 PROC_RUNNABLE
-  vaddr_t sp;          // 스택 포인터
-  uint8_t stack[8192]; // 커널 스택 (CPU 레지스터, 함수 리턴 주소, 로컬 변수)
-};
-
 struct process procs[PROCS_MAX]; // 모든 프로세스 제어 구조체 배열
 struct process *current_proc;    // 현재 실행 중인 프로세스
 struct process *idle_proc;       // Idle 프로세스
+
+extern char __kernel_base[];
+extern char __free_ram[], __free_ram_end[];
+
+/** Bump Allocator / Linear Allocator
+ * @brief  메모리 할당 함수, (메모리 해제 기능 없음)
+ *
+ * @param n 할당할 페이지 수
+ * @return paddr_t 할당된 메모리 주소
+ */
+paddr_t alloc_pages(uint32_t n) {
+  static paddr_t next_paddr = (paddr_t)__free_ram;
+  paddr_t paddr = next_paddr;
+  // 링커 스크립트에서 ALIGN(4096)으로 정렬되어 있음
+  next_paddr += n * PAGE_SIZE;
+
+  if (next_paddr > (paddr_t)__free_ram_end)
+    PANIC("out of memory");
+
+  memset((void *)paddr, 0, n * PAGE_SIZE);
+  return paddr;
+}
+
+/**
+ * @brief 가상주소를 물리주소로 매핑하는 페이지 테이블 엔트리를 설정
+ *
+ * table1 (1단계 페이지 테이블)
+ * - 각 엔트리는 2단계 페이지 테이블의 물리 주소와 플래그를 포함
+ *
+ * table0 (2단계 페이지 테이블)
+ * - 각 엔트리는 물리 주소와 플래그를 포함
+ *
+ * @param table1 1단계 페이지 테이블의 포인터
+ * @param vaddr 매핑할 가상 주소
+ * @param paddr 매핑할 물리 주소
+ * @param flags 페이지 속성 플래그
+ */
+void map_page(uint32_t *table1, uint32_t vaddr, paddr_t paddr, uint32_t flags) {
+  // 주소 정렬 검사, 각 주소가 페이지 크기에 맞게 정렬되어 있는지 확인
+  if (!is_aligned(vaddr, PAGE_SIZE))
+    PANIC("unaligned vaddr %x", vaddr);
+  if (!is_aligned(paddr, PAGE_SIZE))
+    PANIC("unaligned paddr %x", paddr);
+
+  // 1단계 페이지 테이블 인덱스 계산 (오른쪽으로 22칸 시프트, 상위 10비트)
+  uint32_t vpn1 = (vaddr >> 22) & 0x3ff;
+
+  // 2단계 페이지 테이블 생성 확인 (지연 할당, 요구 페이징)
+  // 처음부터 모든 주소에 대해 2단계 테이블을 만들면 메모리가 낭비
+  // 필요할 때만 2단계 테이블을 생성하여 메모리를 절약
+  if ((table1[vpn1] & PAGE_V) == 0) {
+    // 2단계 페이지 테이블을 위한 물리 메모리 할당
+    uint32_t pt_paddr = alloc_pages(1);
+    // 물리 페이지 번호 (PPN)과 플래그를 설정하여 1단계 페이지 테이블에 매핑
+    table1[vpn1] = ((pt_paddr / PAGE_SIZE) << 10) | PAGE_V;
+  }
+
+  // 중간 10비트를 추출하여 2단계 페이지 테이블의 인덱스로 사용
+  uint32_t vpn0 = (vaddr >> 12) & 0x3ff;
+  // 가상 주소의 중간 10비트를 추출하여 2단계 페이지 테이블의 인덱스로 사용
+  uint32_t *table0 = (uint32_t *)((table1[vpn1] >> 10) * PAGE_SIZE);
+  // 물리 주소와 플래그를 설정하여 최종 매핑
+  table0[vpn0] = ((paddr / PAGE_SIZE) << 10) | flags | PAGE_V;
+}
 
 /**
  * @brief 프로세스 생성
@@ -60,32 +117,18 @@ struct process *create_process(uint32_t pc) {
   *--sp = 0;            // s0
   *--sp = (uint32_t)pc; // ra (처음 실행 시 점프할 주소)
 
+  uint32_t *page_table = (uint32_t *)alloc_pages(1);
+  // 커널 메모리 영역을 일대일 방식으로 매핑
+  for (paddr_t paddr = (paddr_t)__kernel_base; paddr < (paddr_t)__free_ram_end;
+       paddr += PAGE_SIZE)
+    map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
+
   // 구조체 필드 초기화
   proc->pid = i + 1;
   proc->state = PROC_RUNNABLE;
   proc->sp = (uint32_t)sp;
+  proc->page_table = page_table;
   return proc;
-}
-
-extern char __free_ram[], __free_ram_end[];
-
-/** Bump Allocator / Linear Allocator
- * @brief  메모리 할당 함수, (메모리 해제 기능 없음)
- *
- * @param n 할당할 페이지 수
- * @return paddr_t 할당된 메모리 주소
- */
-paddr_t alloc_pages(uint32_t n) {
-  static paddr_t next_paddr = (paddr_t)__free_ram;
-  paddr_t paddr = next_paddr;
-  // 링커 스크립트에서 ALIGN(4096)으로 정렬되어 있음
-  next_paddr += n * PAGE_SIZE;
-
-  if (next_paddr > (paddr_t)__free_ram_end)
-    PANIC("out of memory");
-
-  memset((void *)paddr, 0, n * PAGE_SIZE);
-  return paddr;
 }
 
 /* 외부 심볼 선언
@@ -225,9 +268,13 @@ void yield(void) {
   // 다음 프로세스의 스택 포인터를 sscratch CSR에 저장
   // 나중에 예외가 발생했을 때, 커널이 이 스택을 사용하여 컨텍스트 복원
   __asm__ __volatile__(
+      "sfence.vma\n" // TLB(Tanslation Lookaside Buffer) 엔트리를 모두 무효화
+      "csrw satp, %[satp]\n" // satp 레지스터에 값을 쓰면 페이지 테이블 변경
+      "sfence.vma\n" // 새로운 페이지 테이블 설정이 즉시 적용되도록 무효화 처리
       "csrw sscratch, %[sscratch]\n"
       :
-      : [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
+      : [satp] "r"(SATP_SV32 | ((uint32_t)next->page_table / PAGE_SIZE)),
+        [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
 
   // 컨텍스트 스위칭
   struct process *prev = current_proc;
@@ -244,14 +291,14 @@ void yield(void) {
  */
 __attribute__((naked)) __attribute__((aligned(4))) void kernel_entry(void) {
   __asm__ __volatile__(
-      "csrw sp, sscratch, sp\n" // sscratch와 sp 레지스터 값을 서로 교환,
-                                // sscratch로부터 커널 스택의 실행 중인
-                                // 프로세스를 복원
-      "addi sp, sp, -4 * 31\n"  // 스택에 31개 레지스터를 저장할 공간 확보
-      "sw ra,  4 * 0(sp)\n"     // 리턴 주소 저장
-      "sw gp,  4 * 1(sp)\n"     // 전역 포인터 저장
-      "sw tp,  4 * 2(sp)\n"     // 스레드 포인터 저장
-      "sw t0,  4 * 3(sp)\n"     // =================== t0 ~ t6 (임시 레지스터)
+      "csrrw sp, sscratch, sp\n" // sscratch와 sp 레지스터 값을 서로 교환,
+                                 // sscratch로부터 커널 스택의 실행 중인
+                                 // 프로세스를 복원
+      "addi sp, sp, -4 * 31\n"   // 스택에 31개 레지스터를 저장할 공간 확보
+      "sw ra,  4 * 0(sp)\n"      // 리턴 주소 저장
+      "sw gp,  4 * 1(sp)\n"      // 전역 포인터 저장
+      "sw tp,  4 * 2(sp)\n"      // 스레드 포인터 저장
+      "sw t0,  4 * 3(sp)\n"      // =================== t0 ~ t6 (임시 레지스터)
       "sw t1,  4 * 4(sp)\n"
       "sw t2,  4 * 5(sp)\n"
       "sw t3,  4 * 6(sp)\n"
