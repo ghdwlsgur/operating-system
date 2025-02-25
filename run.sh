@@ -3,6 +3,7 @@
 set -xue
 
 QEMU=qemu-system-riscv32
+OBJCOPY=/opt/homebrew/opt/llvm/bin/llvm-objcopy
 
 # clang 경로, 컴파일 옵션
 CC=/opt/homebrew/opt/llvm/bin/clang
@@ -17,6 +18,17 @@ CFLAGS=(
   -ffreestanding               # 호스트 표준 라이브러리를 사용하지 않음
   -nostdlib                    # 표준 라이브러리를 링크하지 않음
 )
+
+# 애플리케이션 빌드
+$CC "${CFLAGS[@]}" \
+  -Wl,-Tuser.ld \
+  -Wl,-Map=shell.map \
+  -o shell.elf \
+  shell.c user.c common.c
+
+# ELF 형식의 실행 파일을 실제 메모리 내용만 포함하는 바이너리로 변환
+$OBJCOPY --set-section-flags .bss=alloc,contents -O binary shell.elf shell.bin
+$OBJCOPY -Ibinary -Oelf32-littleriscv shell.bin shell.bin.o
 
 # 커널 빌드
 $CC "${CFLAGS[@]}" \
