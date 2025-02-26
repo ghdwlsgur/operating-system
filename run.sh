@@ -35,7 +35,7 @@ $CC "${CFLAGS[@]}" \
   -Wl,-Tkernel.ld \
   -Wl,-Map=kernel.map \
   -o kernel.elf \
-  kernel.c common.c
+  kernel.c common.c shell.bin.o
 
 # virt 머신 시작
 # QEMU가 제공하는 기본 펌웨어(OpenSBI)를 사용

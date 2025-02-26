@@ -16,6 +16,31 @@ struct process *idle_proc;       // Idle 프로세스
 extern char __kernel_base[];
 extern char __free_ram[], __free_ram_end[];
 
+// shell.bin.o에 포함된 원시 바이너리 사용
+extern char _binary_shell_bin_start[], _binary_shell_bin_size[];
+
+/**
+ * @brief 사용자 모드 진입 함수
+ *
+ */
+__attribute__((naked)) void user_entry(void) {
+  __asm__ __volatile__(
+      /* sepc(Supervisor Exception Program Counter) 레지스터에 USER_BASE 값을 씀
+       * 이 레지스터는 sret 명령어 실행 시 프로그램이 돌아갈 주소를 지정
+       * 즉, 사용자 프로그램(USER_BASE 주소)으로 점프 */
+      "csrw sepc, %[sepc] \n"
+
+      /* sstatus(Supervisor Status) 레지스터에 SSTATUS_SPIE 값을 씀
+       * SSTATUS_SPIE는 인터럽트 활성화 상태와 관련된 비트 */
+      "csrw sstatus, %[sstatus] \n"
+
+      /* Supervisor Return, 예외 처리를 완료하고 sepc에 저장된 주소로 복귀
+       * 특권 모드에서 사용자 모드로 전환 */
+      "sret \n"
+      :
+      : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE));
+}
+
 /** Bump Allocator / Linear Allocator
  * @brief  메모리 할당 함수, (메모리 해제 기능 없음)
  *
@@ -78,12 +103,14 @@ void map_page(uint32_t *table1, uint32_t vaddr, paddr_t paddr, uint32_t flags) {
 }
 
 /**
- * @brief 프로세스 생성
+ * @brief 프로세스 생성, 지정된 크기만큼 실행된 이미지를 페이지 단위로 복사하여
+ * 프로세스의 페이지 테이블에 매핑
  *
- * @param pc 프로세스가 처음 실행할 주소
- * @return struct process*  생성된 프로세스 구조체의 주소
+ * @param image 실행 이미지의 포인터
+ * @param image_size 이미지 크기
+ * @return struct process* 생성된 프로세스 구조체의 주소
  */
-struct process *create_process(uint32_t pc) {
+struct process *create_process(const void *image, size_t image_size) {
   // 미사용 상태의 프로세스 구조체 찾기
   struct process *proc = NULL;
   int i;
@@ -103,25 +130,43 @@ struct process *create_process(uint32_t pc) {
 
   // 커널 스택에 callee-saved 레지스터 공간을 미리 준비
   // 첫 컨텍스트 스위치 시, switch_context에서 이 값들을 복원
-  *--sp = 0;            // s11
-  *--sp = 0;            // s10
-  *--sp = 0;            // s9
-  *--sp = 0;            // s8
-  *--sp = 0;            // s7
-  *--sp = 0;            // s6
-  *--sp = 0;            // s5
-  *--sp = 0;            // s4
-  *--sp = 0;            // s3
-  *--sp = 0;            // s2
-  *--sp = 0;            // s1
-  *--sp = 0;            // s0
-  *--sp = (uint32_t)pc; // ra (처음 실행 시 점프할 주소)
+  *--sp = 0;                    // s11
+  *--sp = 0;                    // s10
+  *--sp = 0;                    // s9
+  *--sp = 0;                    // s8
+  *--sp = 0;                    // s7
+  *--sp = 0;                    // s6
+  *--sp = 0;                    // s5
+  *--sp = 0;                    // s4
+  *--sp = 0;                    // s3
+  *--sp = 0;                    // s2
+  *--sp = 0;                    // s1
+  *--sp = 0;                    // s0
+  *--sp = (uint32_t)user_entry; // ra (처음 실행 시 점프할 주소)
 
   uint32_t *page_table = (uint32_t *)alloc_pages(1);
+
   // 커널 메모리 영역을 일대일 방식으로 매핑
   for (paddr_t paddr = (paddr_t)__kernel_base; paddr < (paddr_t)__free_ram_end;
        paddr += PAGE_SIZE)
     map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
+
+  // 루프를 사용하여 이미지를 페이지 단위로 처리
+  for (uint32_t off = 0; off < image_size; off += PAGE_SIZE) {
+    // 새 물리 메모리 페이지 할당
+    paddr_t page = alloc_pages(1);
+
+    // 현재 오프셋에서 복사할 크기를 계산
+    size_t remaining = image_size - off;
+    size_t copy_size = PAGE_SIZE <= remaining ? PAGE_SIZE : remaining;
+
+    // 이미지 데이터를 새로 할당된 페이지에 복사
+    memcpy((void *)page, image + off, copy_size);
+
+    // 가상 메모리 주소를 물리 메모리에 매핑
+    map_page(page_table, USER_BASE + off, page,
+             PAGE_U | PAGE_R | PAGE_W | PAGE_X);
+  }
 
   // 구조체 필드 초기화
   proc->pid = i + 1;
@@ -415,12 +460,11 @@ void kernel_main(void) {
    */
   WRITE_CSR(stvec, (uint32_t)kernel_entry);
 
-  idle_proc = create_process((uint32_t)NULL);
+  idle_proc = create_process(NULL, 0);
   idle_proc->pid = 0; // idle
   current_proc = idle_proc;
 
-  proc_a = create_process((uint32_t)proc_a_entry);
-  proc_b = create_process((uint32_t)proc_b_entry);
+  create_process(_binary_shell_bin_start, (size_t)_binary_shell_bin_size);
 
   yield();
   PANIC("switched to idle process");
