@@ -19,7 +19,27 @@ extern char __free_ram[], __free_ram_end[];
 // shell.bin.o에 포함된 원시 바이너리 사용
 extern char _binary_shell_bin_start[], _binary_shell_bin_size[];
 
-void user_entry(void) { PANIC("not yet implemented"); }
+/**
+ * @brief 사용자 모드 진입 함수
+ *
+ */
+__attribute__((naked)) void user_entry(void) {
+  __asm__ __volatile__(
+      /* sepc(Supervisor Exception Program Counter) 레지스터에 USER_BASE 값을 씀
+       * 이 레지스터는 sret 명령어 실행 시 프로그램이 돌아갈 주소를 지정
+       * 즉, 사용자 프로그램(USER_BASE 주소)으로 점프 */
+      "csrw sepc, %[sepc] \n"
+
+      /* sstatus(Supervisor Status) 레지스터에 SSTATUS_SPIE 값을 씀
+       * SSTATUS_SPIE는 인터럽트 활성화 상태와 관련된 비트 */
+      "csrw sstatus, %[sstatus] \n"
+
+      /* Supervisor Return, 예외 처리를 완료하고 sepc에 저장된 주소로 복귀
+       * 특권 모드에서 사용자 모드로 전환 */
+      "sret \n"
+      :
+      : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE));
+}
 
 /** Bump Allocator / Linear Allocator
  * @brief  메모리 할당 함수, (메모리 해제 기능 없음)
