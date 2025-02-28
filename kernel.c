@@ -430,11 +430,30 @@ void proc_b_entry(void) {
   }
 }
 
+// SBI 호출을 통해 문자 입력을 받음
+long getchar(void) {
+  struct sbiret ret = sbi_call(0, 0, 0, 0, 0, 0, 0, 2);
+  return ret.error;
+}
+
 // 시스템 콜의 종류를 판별하여 처리
 void handle_syscall(struct trap_frame *f) {
   // 시스템 콜 번호가 담긴 a3 레지스터 확인
   // ref: user.c, syscall 함수
   switch (f->a3) {
+  case SYS_GETCHAR:
+    while (1) {
+      long ch = getchar();
+      if (ch >= 0) {
+        f->a0 = ch;
+        break;
+      }
+
+      // 논블로킹 I/O, CPU 양보
+      yield();
+    }
+    break;
+
   case SYS_PUTCHAR:
     putchar(f->a0);
     break;

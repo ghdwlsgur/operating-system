@@ -7,7 +7,9 @@ typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
 typedef uint32_t size_t;
 
+// 시스템 콜 관련 매크로
 #define SYS_PUTCHAR 1
+#define SYS_GETCHAR 2
 
 // 물리 메모리 주소를 나타내는 타입 (pysical memory address)
 typedef uint32_t paddr_t;

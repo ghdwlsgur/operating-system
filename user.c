@@ -46,3 +46,5 @@ int syscall(int sysno, int arg0, int arg1, int arg2) {
 
 // 단일 문자 출력
 void putchar(char ch) { syscall(SYS_PUTCHAR, ch, 0, 0); }
+
+int getchar(void) { return syscall(SYS_GETCHAR, 0, 0, 0); }
