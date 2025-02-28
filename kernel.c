@@ -226,15 +226,6 @@ void putchar(char ch) {
   sbi_call(ch, 0, 0, 0, 0, 0, 0, 1 /* Console Putchar */);
 }
 
-void handle_trap(struct trap_frame *f) {
-  uint32_t scause = READ_CSR(scause); // 어떤 이유로 예외가 발생했는지
-  uint32_t stval = READ_CSR(stval);   // 예외 부가정보 (잘못된 메모리 주소...)
-  uint32_t user_pc = READ_CSR(sepc);  // 예외가 일어난 시점의 PC
-
-  PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval,
-        user_pc);
-}
-
 /**
  * @brief 프로세스 간 컨텍스트 스위치 수행
  * called-saved 레지스터(ra, sp, s0-s11)만 저장/복원하여 성능 최적화
@@ -439,11 +430,27 @@ void proc_b_entry(void) {
   }
 }
 
+// 시스템 콜의 종류를 판별하여 처리
+void handle_syscall(struct trap_frame *f) {
+  // 시스템 콜 번호가 담긴 a3 레지스터 확인
+  // ref: user.c, syscall 함수
+  switch (f->a3) {
+  case SYS_PUTCHAR:
+    putchar(f->a0);
+    break;
+  default:
+    PANIC("unexpected syscall a3=%x\n", f->a3);
+  }
+}
+
 // 트랩 핸들러
 void handle_trap(struct trap_frame *f) {
-  uint32_t scause = READ_CSR(scause); // 트랩의 원인
-  uint32_t stval = READ_CSR(stval);   // 트랩과 관련된 추가 정보
-  uint32_t user_pc = READ_CSR(sepc);  // 트랩이 발생한 명령어의 주소
+  // 트랩의 원인, (어떤 이유로 예외가 발생했는지)
+  uint32_t scause = READ_CSR(scause);
+  // 트랩과 관련된 추가 정보 (예외 부가정보, ex.잘못된 메모리 주소...)
+  uint32_t stval = READ_CSR(stval);
+  // 트랩이 발생한 명령어의 주소 (예외가 일어난 시점의 PC)
+  uint32_t user_pc = READ_CSR(sepc);
 
   // 시스템 콜인 경우
   if (scause == SCAUSE_ECALL) {

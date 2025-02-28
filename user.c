@@ -7,8 +7,6 @@ __attribute__((noreturn)) void exit(void) {
     ;
 }
 
-void putchar(char c) {}
-
 __attribute__((section(".text.start"))) __attribute__((naked)) void
 start(void) {
   __asm__ __volatile__("mv sp, %[stack_top] \n"
