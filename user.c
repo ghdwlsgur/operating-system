@@ -2,18 +2,6 @@
 
 extern char __stack_top[];
 
-__attribute__((noreturn)) void exit(void) {
-  for (;;)
-    ;
-}
-
-__attribute__((section(".text.start"))) __attribute__((naked)) void
-start(void) {
-  __asm__ __volatile__("mv sp, %[stack_top] \n"
-                       "call main \n"
-                       "call exit \n" ::[stack_top] "r"(__stack_top));
-}
-
 /**
  * @brief 시스템 콜을 호출
  * 1. 함수 인자들을 RISC-V의 인자 레지스터에 로드
@@ -48,3 +36,16 @@ int syscall(int sysno, int arg0, int arg1, int arg2) {
 void putchar(char ch) { syscall(SYS_PUTCHAR, ch, 0, 0); }
 
 int getchar(void) { return syscall(SYS_GETCHAR, 0, 0, 0); }
+
+__attribute__((noreturn)) void exit(void) {
+  syscall(SYS_EXIT, 0, 0, 0);
+  for (;;)
+    ;
+}
+
+__attribute__((section(".text.start"))) __attribute__((naked)) void
+start(void) {
+  __asm__ __volatile__("mv sp, %[stack_top] \n"
+                       "call main \n"
+                       "call exit \n" ::[stack_top] "r"(__stack_top));
+}
