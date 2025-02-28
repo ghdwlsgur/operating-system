@@ -7,6 +7,8 @@ typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
 typedef uint32_t size_t;
 
+#define SYS_PUTCHAR 1
+
 // 물리 메모리 주소를 나타내는 타입 (pysical memory address)
 typedef uint32_t paddr_t;
 // 가상 메모리 주소를 나타내는 타입 (virtual memory address)

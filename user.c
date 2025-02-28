@@ -45,3 +45,6 @@ int syscall(int sysno, int arg0, int arg1, int arg2) {
 
   return a0;
 }
+
+// 단일 문자 출력
+void putchar(char ch) { syscall(SYS_PUTCHAR, ch, 0, 0); }
