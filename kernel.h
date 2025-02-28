@@ -3,6 +3,7 @@
 
 // 예외 트랩 핸들러
 #define SCAUSE_ECALL 8
+#define PROC_EXITED 2
 
 // Sv32 방식의 페이지 테이블
 #define SATP_SV32 (1u << 31) // Sv32 모드 페이징 활성화
