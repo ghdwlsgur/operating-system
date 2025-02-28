@@ -1,6 +1,9 @@
 #pragma once
 #include "common.h"
 
+// 예외 트랩 핸들러
+#define SCAUSE_ECALL 8
+
 // Sv32 방식의 페이지 테이블
 #define SATP_SV32 (1u << 31) // Sv32 모드 페이징 활성화
 #define PAGE_V (1 << 0)      // "Valid" 비트 (엔트리가 유효함을 의미)
