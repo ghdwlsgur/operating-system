@@ -19,10 +19,7 @@ extern char __free_ram[], __free_ram_end[];
 // shell.bin.o에 포함된 원시 바이너리 사용
 extern char _binary_shell_bin_start[], _binary_shell_bin_size[];
 
-/**
- * @brief 사용자 모드 진입 함수
- *
- */
+// 사용자 모드 진입 함수
 __attribute__((naked)) void user_entry(void) {
   __asm__ __volatile__(
       /* sepc(Supervisor Exception Program Counter) 레지스터에 USER_BASE 값을 씀
@@ -440,6 +437,24 @@ void proc_b_entry(void) {
     putchar('B');
     yield();
   }
+}
+
+// 트랩 핸들러
+void handle_trap(struct trap_frame *f) {
+  uint32_t scause = READ_CSR(scause); // 트랩의 원인
+  uint32_t stval = READ_CSR(stval);   // 트랩과 관련된 추가 정보
+  uint32_t user_pc = READ_CSR(sepc);  // 트랩이 발생한 명령어의 주소
+
+  // 시스템 콜인 경우
+  if (scause == SCAUSE_ECALL) {
+    handle_syscall(f);
+    user_pc += 4;
+  } else {
+    PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval,
+          user_pc);
+  }
+
+  WRITE_CSR(sepc, user_pc);
 }
 
 // 커널 메인 함수
