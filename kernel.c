@@ -488,6 +488,27 @@ void handle_trap(struct trap_frame *f) {
   WRITE_CSR(sepc, user_pc);
 }
 
+// virtio 블록 디바이스의 32비트 레지스터 값 읽기
+uint32_t virtio_req_read32(unsigned offset) {
+  return *((volatile uint32_t *)(VIRTIO_BLK_PADDR + offset));
+}
+
+// virtio 블록 디바이스의 64비트 레지스터 값 읽기
+uint64_t virtio_reg_read64(unsigned offset) {
+  return *((volatile uint64_t *)(VIRTIO_BLK_PADDR + offset));
+}
+
+// virtio 블록 디바이스의 32비트 레지스터에 값을 쓰기
+void virtio_reg_write32(unsigned offset, uint32_t value) {
+  *((volatile uint32_t *)(VIRTIO_BLK_PADDR + offset)) = value;
+}
+
+// Read-Modify-Write (RMW) 연산
+// 레지스터의 현재 값을 읽고 지정된 비트들을 OR 연산 설정 후 쓰기 작업
+void virtio_reg_fetch_and_or32(unsigned offset, uint32_t value) {
+  virtio_reg_write32(offset, virtio_reg_read32(offset) | value);
+}
+
 // 커널 메인 함수
 void kernel_main(void) {
   /* BSS 영역 초기화 (BSS 영역만큼 버퍼를 0으로 채움)
