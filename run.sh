@@ -41,4 +41,6 @@ $CC "${CFLAGS[@]}" \
 # QEMU가 제공하는 기본 펌웨어(OpenSBI)를 사용
 # GUI 없이 콘솔만
 $QEMU -machine virt -bios default -nographic -serial mon:stdio --no-reboot \
-  -kernel kernel.elf
+  -kernel kernel.elf \
+  -d unimp,guest_errors,int,cpu_reset -D qemu.log \
+  -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 -drive id=drive0,file=lorem.txt,format=raw,if=none
