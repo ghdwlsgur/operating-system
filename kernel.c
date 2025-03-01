@@ -148,6 +148,9 @@ struct process *create_process(const void *image, size_t image_size) {
        paddr += PAGE_SIZE)
     map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
 
+  // virtio 블록 디바이스의 메모리 영역도 프로세스 페이지 테이블에 매핑
+  map_page(page_table, VIRTIO_BLK_PADDR, VIRTIO_BLK_PADDR, PAGE_R | PAGE_W);
+
   // 루프를 사용하여 이미지를 페이지 단위로 처리
   for (uint32_t off = 0; off < image_size; off += PAGE_SIZE) {
     // 새 물리 메모리 페이지 할당
