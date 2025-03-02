@@ -74,11 +74,16 @@ struct virtio_virtq {
 
 // virtio-blk 요청 구조체
 struct virtio_blk_req {
+  // 첫 번째 디스크립터: 장치에서 읽어올 데이터를 위한 영역 (읽기 전용)
   uint32_t type;     // 요청 타입
   uint32_t reserved; // 예약된 필드
   uint64_t sector;   // 접근하려는 디스크 섹터 번호
+
+  // 두 번째 디스크립터: 읽기 작업 시, 장치가 데이터를 쓰도록 허용
   uint8_t data[512]; // 데이터 버퍼
-  uint8_t status;    // 작업의 결과 상태
+
+  // 세 번째 디스크립터: 장치가 쓸 수 있는 상태 정보 영역
+  uint8_t status; // 작업의 결과 상태
 } __attribute__((packed));
 
 // 예외 트랩 핸들러
