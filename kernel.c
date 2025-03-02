@@ -512,6 +512,75 @@ void virtio_reg_fetch_and_or32(unsigned offset, uint32_t value) {
   virtio_reg_write32(offset, virtio_reg_read32(offset) | value);
 }
 
+// 블록 장치에 요청을 전송하기 위한 가상 큐 포인터
+struct virtio_virtq *blk_request_vq;
+// 블록 장치 요청 구조체로, 읽기/쓰기 명령과 관련 데이터를 포함
+struct virtio_blk_req *blk_req;
+// 블록 요청 구조체의 물리 주소
+paddr_t blk_req_paddr;
+// 블록 장치의 총 용량(바이트 단위)
+unsigned blk_capacity;
+
+void virtio_blk_init(void) {
+  // 0x74726976은 ASCII로 "virv"이며, VirtIO 장치임을 확인하는 매직값
+  if (virtio_reg_read32(VIRTIO_REG_MAGIC) != 0x74726976)
+    PANIC("virtio: invalid magic value");
+  // 버전과 장치 ID 검증
+  if (virtio_reg_read32(VIRTIO_REG_VERSION) != 1)
+    PANIC("virtio: invalid version");
+  if (virtio_reg_read32(VIRTIO_REG_DEVICE_ID) != VIRTIO_DEVICE_BLK)
+    PANIC("virtio: invalid device id");
+
+  // 1. 장치 리셋 (레지스터를 0으로 초기화)
+  virtio_reg_write32(VIRTIO_REG_DEVICE_STATUS, 0);
+  // 2. ACKNOWLEDGE 상태 비트를 설정: 게스트 OS가 장치를 인식했음을 알림
+  virtio_reg_fetch_and_or32(VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_ACK);
+  // 3. DRIVER 상태 비트를 설정
+  virtio_reg_fetch_and_or32(VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_DRIVER);
+  // 4. FEATURES_OK 상태 비트를 설정
+  virtio_reg_fetch_and_or32(VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FEAT_OK);
+  // 5. 장치별 설정 수행 (예, virtqueue 검색)
+  blk_request_vq = virtq_init(0);
+  // 6. DRIVER_OK 상태 비트를 설정
+  virtio_reg_write32(VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_DRIVER_OK);
+
+  // 디스크 용량을 가져옴
+  blk_capacity = virtio_reg_read64(VIRTIO_REG_DEVICE_CONFIG + 0) * SECTOR_SIZE;
+  printf("virtio-blk: capacity is %d bytes\n", blk_capacity);
+
+  // 장치에 요청(request)을 저장할 영역 할당
+  blk_req_paddr =
+      alloc_pages(align_up(sizeof(*blk_req), PAGE_SIZE) / PAGE_SIZE);
+  blk_req = (struct virtio_blk_req *)blk_req_paddr;
+}
+
+/**
+ * @brief virtqueue를 위한 메모리 영역을 할당하고 물리적 주소를 장치에 알림
+ *
+ * @param index 초기화할 virtqueue의 번호
+ * @return struct virtio_virtq*
+ */
+struct virtio_virtq *virtq_init(unsigned index) {
+  // 메모리 할당
+  paddr_t virtq_paddr =
+      alloc_pages(align_up(sizeof(struct virtio_virtq), PAGE_SIZE) / PAGE_SIZE);
+
+  // 가상 큐 초기화
+  struct virtio_virtq *vq = (struct virtio_virtq *)virtq_paddr;
+  vq->queue_index = index;
+  vq->used_index = (volatile uint16_t *)&vq->used.index;
+
+  // 1. QueueSel 레지스터에 인덱스를 기록하여 큐 선택
+  virtio_reg_write32(VIRTIO_REG_QUEUE_SEL, index);
+  // 2. QueueNum 레지스터에 큐의 크기를 기록하여 장치에 알림
+  virtio_reg_write32(VIRTIO_REG_QUEUE_NUM, VIRTQ_ENTRY_NUM);
+  // 3. QueueAlign 레지스터에 정렬값(바이트 단위)을 기록
+  virtio_reg_write32(VIRTIO_REG_QUEUE_ALIGN, 0);
+  // 4. 할당한 큐 메모리의 첫 페이지의 물리적 번호를 QueuePFN 레지스터에 기록
+  virtio_reg_write32(VIRTIO_REG_QUEUE_PFN, virtq_paddr);
+  return vq;
+}
+
 // 커널 메인 함수
 void kernel_main(void) {
   /* BSS 영역 초기화 (BSS 영역만큼 버퍼를 0으로 채움)
@@ -529,6 +598,8 @@ void kernel_main(void) {
    * 5. 예외 처리 시작
    */
   WRITE_CSR(stvec, (uint32_t)kernel_entry);
+
+  virtio_blk_init();
 
   idle_proc = create_process(NULL, 0);
   idle_proc->pid = 0; // idle
