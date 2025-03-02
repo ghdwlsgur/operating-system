@@ -649,6 +649,66 @@ void read_write_disk(void *buf, unsigned sector, int is_write) {
     memcpy(buf, blk_req->data, SECTOR_SIZE);
 }
 
+// 파일 시스템의 파일 테이블
+struct file files[FILES_MAX];
+// 디스크 이미지를 메모리에 로드하기 위한 버퍼
+uint8_t disk[DISK_MAX_SIZE];
+
+/**
+ * @brief 8진수(octal) 문자열을 10진수(decimal) 정수로 변환
+ *
+ * @param oct 8진수 문자열의 포인터
+ * @param len 문자열의 최대 길이
+ * @return int
+ */
+int oct2int(char *oct, int len) {
+  int dec = 0;
+  for (int i = 0; i < len; i++) {
+    if (oct[i] < '0' || oct[i] > '7')
+      break;
+    dec = dec * 8 + (oct[i] - '0');
+  }
+  return dec;
+}
+
+// 파일 시스템 초기화
+// 1. 전체 디스크 내용을 메모리에 로드
+// 2. TAR 형식의 헤더를 순차적으로 파싱
+// 3. 각 파일의 메타데이터(이름, 크기 등)을 추출
+// 4. 파일 데이터를 메모리 내 파일 시스템 구조에 로드
+// 5. 모든 파일을 처리하거나 비어있는 헤더를 만나면 초기화 완료
+void fs_init(void) {
+  // 디스크 데이터 로드
+  for (unsigned sector = 0; sector < sizeof(disk) / SECTOR_SIZE; sector++)
+    read_write_disk(&disk[sector * SECTOR_SIZE], sector, false);
+
+  // TAR 파일 구조 파싱
+  unsigned off = 0;
+  for (int i = 0; i < FILES_MAX; i++) {
+
+    // TAR 파일 헤더 검사
+    struct tar_header *header = (struct tar_header *)&disk[off];
+    if (header->name[0] == '\0')
+      break;
+
+    // TAR 포맷 검증
+    if (strcmp(header->magic, "ustar") != 0)
+      PANIC("invalid tar header: magix=\"%s\"", header->magic);
+
+    // 파일 크기 추출 및 파일 정보 저장
+    int filesz = oct2int(header->size, sizeof(header->size));
+    struct file *file = &files[i];
+    file->in_use = true;
+    strcpy(file->name, header->name);
+    memcpy(file->data, header->data, filesz);
+    file->size = filesz;
+    printf("file: %s, size=%d\n", file->name, file->size);
+
+    // 다음 파일 헤더로 이동
+    off += align_up(sizeof(struct tar_header) + filesz, SECTOR_SIZE);
+  }
+}
+
 // 커널 메인 함수
 void kernel_main(void) {
   /* BSS 영역 초기화 (BSS 영역만큼 버퍼를 0으로 채움)
@@ -668,6 +728,7 @@ void kernel_main(void) {
   WRITE_CSR(stvec, (uint32_t)kernel_entry);
 
   virtio_blk_init();
+  fs_init();
 
   char buf[SECTOR_SIZE];
   read_write_disk(buf, 0, false /* read from the disk */);

@@ -4,6 +4,22 @@
 #define FILES_MAX 2
 #define DISK_MAX_SIZE align_up(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)
 
+// #define ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
+// #define DISK_MAX_SIZE ALIGN_UP(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)
+
+/* tar 파일은 아래와 같은 구조
+  +----------------+
+  |   tar header   |
+  +----------------+
+  |   file data    |
+  +----------------+
+  |   tar header   |
+  +----------------+
+  |   file data    |
+  +----------------+
+  |      ...       |
+ */
+
 // 총 512바이트 크기의 파일에 대한 메타데이터를 포함
 struct tar_header {
   char name[100];     // 파일의 이름
@@ -31,7 +47,7 @@ struct file {
   char name[100];
   char data[1024];
   size_t size;
-}
+};
 
 // virtio 관련 매크로
 #define SECTOR_SIZE 512    // 디스크 섹터 크기 512바이트
