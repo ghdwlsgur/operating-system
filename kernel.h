@@ -6,6 +6,7 @@
 
 #define ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
 #define DISK_MAX_SIZE ALIGN_UP(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)
+#define SSTATUS_SUM (1 << 18)
 
 // #define ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
 // #define DISK_MAX_SIZE ALIGN_UP(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)
