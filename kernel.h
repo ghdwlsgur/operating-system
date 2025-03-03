@@ -1,6 +1,58 @@
 #pragma once
 #include "common.h"
 
+#define FILES_MAX 2
+// #define DISK_MAX_SIZE align_up(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)
+
+#define ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
+#define DISK_MAX_SIZE ALIGN_UP(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)
+#define SSTATUS_SUM (1 << 18)
+
+// #define ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
+// #define DISK_MAX_SIZE ALIGN_UP(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)
+
+/* tar 파일은 아래와 같은 구조
+  +----------------+
+  |   tar header   |
+  +----------------+
+  |   file data    |
+  +----------------+
+  |   tar header   |
+  +----------------+
+  |   file data    |
+  +----------------+
+  |      ...       |
+ */
+
+// 총 512바이트 크기의 파일에 대한 메타데이터를 포함
+struct tar_header {
+  char name[100];     // 파일의 이름
+  char mode[8];       // 파일의 권한 모드
+  char uid[8];        // 파일 소유자 8진수
+  char gid[8];        // 파일 소유자 그룹 8진수
+  char size[12];      // 파일 크기
+  char mtime[12];     // 마지막 수정 시간
+  char checksum[8];   // 헤더 블록의 체크섬 값
+  char type;          // 파일의 타입
+  char linkname[100]; // 링크가 가리키는 원본 파일명
+  char magic[6];      // ustar 형식임을 식별
+  char version[2];    // ustar 버전
+  char uname[32];     // 소유자 이름
+  char gname[32];     // 그룹의 이름
+  char devmajor[8];   // 장치 파일의 경우, 주 번호
+  char devminor[8];   // 장치 파일의 경우, 부 번호
+  char prefix[155];   // 긴 파일명을 지원하기 위한 추가 접두사
+  char padding[12];   // 헤더 크기를 512바이트로 맞추기 위한 패딩
+  char data[];        // 가변 크기 배열, 실제 파일 데이터는 헤더 이후 위치
+} __attribute__((packed));
+
+struct file {
+  bool in_use;
+  char name[100];
+  char data[1024];
+  size_t size;
+};
+
 // virtio 관련 매크로
 #define SECTOR_SIZE 512    // 디스크 섹터 크기 512바이트
 #define VIRTQ_ENTRY_NUM 16 // 가상 큐 엔트리 수 16개

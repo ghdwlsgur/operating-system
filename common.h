@@ -11,6 +11,8 @@ typedef uint32_t size_t;
 #define SYS_PUTCHAR 1
 #define SYS_GETCHAR 2
 #define SYS_EXIT 3
+#define SYS_READFILE 4
+#define SYS_WRITEFILE 5
 
 // 물리 메모리 주소를 나타내는 타입 (pysical memory address)
 typedef uint32_t paddr_t;

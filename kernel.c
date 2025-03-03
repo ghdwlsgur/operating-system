@@ -9,6 +9,10 @@ typedef uint32_t size_t;
 #define PROC_UNUSED 0   // 사용되지 않는 프로세스 구조체
 #define PROC_RUNNABLE 1 // 실행 가능한 프로세스
 
+extern struct file files[FILES_MAX];
+extern uint8_t disk[DISK_MAX_SIZE];
+void read_write_disk(void *buf, unsigned sector, int is_write);
+
 struct process procs[PROCS_MAX]; // 모든 프로세스 제어 구조체 배열
 struct process *current_proc;    // 현재 실행 중인 프로세스
 struct process *idle_proc;       // Idle 프로세스
@@ -36,7 +40,7 @@ __attribute__((naked)) void user_entry(void) {
        * 특권 모드에서 사용자 모드로 전환 */
       "sret \n"
       :
-      : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE));
+      : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE | SSTATUS_SUM));
 }
 
 /** Bump Allocator / Linear Allocator
@@ -440,6 +444,73 @@ long getchar(void) {
   return ret.error;
 }
 
+// 파일명을 기준으로 파일을 검색
+struct file *fs_lookup(const char *filename) {
+  for (int i = 0; i < FILES_MAX; i++) {
+    struct file *file = &files[i];
+    if (!strcmp(file->name, filename))
+      return file;
+  }
+
+  return NULL;
+}
+
+// TAR 형식으로 파일 시스템을 구성하고 가상 블록 장치에 저장
+void fs_flush(void) {
+
+  // 모든 파일 내용을 'disk' 버퍼에 복사
+  memset(disk, 0, sizeof(disk));
+
+  // 현재 디스크 오프셋 위치를 추적
+  unsigned off = 0;
+
+  // 모든 파일을 순회하며 TAR 형식으로 디스크에 저장
+  for (int file_i = 0; file_i < FILES_MAX; file_i++) {
+    struct file *file = &files[file_i];
+    if (!file->in_use) // 사용중이지 않으면 건너뜀
+      continue;
+
+    // TAR 헤더 구성
+    struct tar_header *header = (struct tar_header *)&disk[off];
+    memset(header, 0, sizeof(*header));
+    strcpy(header->name, file->name);
+    strcpy(header->mode, "000644");
+    strcpy(header->magic, "ustar");
+    strcpy(header->version, "00");
+    header->type = '0';
+
+    // 파일 크기를 8진수 문자열로 변환하여 헤더에 설정
+    int filesz = file->size;
+    for (int i = sizeof(header->size); i > 0; i--) {
+      header->size[i - 1] = (filesz % 8) + '0';
+      filesz /= 8;
+    }
+
+    // 헤더 체크섬 계산
+    int checksum = ' ' * sizeof(header->checksum);
+    for (unsigned i = 0; i < sizeof(struct tar_header); i++)
+      checksum += (unsigned char)disk[off + i];
+
+    // 계산된 체크섬을 8진수 문자열로 변환하여 헤더에 설정
+    for (int i = 5; i >= 0; i--) {
+      header->checksum[i] = (checksum % 8) + '0';
+      checksum /= 8;
+    }
+
+    // 파일 데이터를 헤더 뒤에 복사
+    memcpy(header->data, file->data, file->size);
+
+    // 다음 파일을 위해 오프셋 업데이트 (섹터 크기에 맞게 정렬)
+    off += align_up(sizeof(struct tar_header) + file->size, SECTOR_SIZE);
+  }
+
+  // disk 버퍼의 내용을 virtio-blk 디바이스에 기록
+  for (unsigned sector = 0; sector < sizeof(disk) / SECTOR_SIZE; sector++)
+    read_write_disk(&disk[sector * SECTOR_SIZE], sector, true);
+
+  printf("wrote %d bytes to disk\n", sizeof(disk));
+}
+
 // 시스템 콜의 종류를 판별하여 처리
 void handle_syscall(struct trap_frame *f) {
   // 시스템 콜 번호가 담긴 a3 레지스터 확인
@@ -466,6 +537,32 @@ void handle_syscall(struct trap_frame *f) {
   case SYS_PUTCHAR:
     putchar(f->a0);
     break;
+  case SYS_READFILE:
+  case SYS_WRITEFILE: {
+    const char *filename = (const char *)f->a0;
+    char *buf = (char *)f->a1;
+    int len = f->a2;
+    struct file *file = fs_lookup(filename);
+    if (!file) {
+      printf("file not found: %s\n", filename);
+      f->a0 = -1;
+      break;
+    }
+
+    if (len > (int)sizeof(file->data))
+      len = file->size;
+
+    if (f->a3 == SYS_WRITEFILE) {
+      memcpy(file->data, buf, len);
+      file->size = len;
+      fs_flush();
+    } else {
+      memcpy(buf, file->data, len);
+    }
+
+    f->a0 = len;
+    break;
+  }
   default:
     PANIC("unexpected syscall a3=%x\n", f->a3);
   }
@@ -649,6 +746,66 @@ void read_write_disk(void *buf, unsigned sector, int is_write) {
     memcpy(buf, blk_req->data, SECTOR_SIZE);
 }
 
+// 파일 시스템의 파일 테이블
+struct file files[FILES_MAX];
+// 디스크 이미지를 메모리에 로드하기 위한 버퍼
+uint8_t disk[DISK_MAX_SIZE];
+
+/**
+ * @brief 8진수(octal) 문자열을 10진수(decimal) 정수로 변환
+ *
+ * @param oct 8진수 문자열의 포인터
+ * @param len 문자열의 최대 길이
+ * @return int
+ */
+int oct2int(char *oct, int len) {
+  int dec = 0;
+  for (int i = 0; i < len; i++) {
+    if (oct[i] < '0' || oct[i] > '7')
+      break;
+    dec = dec * 8 + (oct[i] - '0');
+  }
+  return dec;
+}
+
+// 파일 시스템 초기화
+// 1. 전체 디스크 내용을 메모리에 로드
+// 2. TAR 형식의 헤더를 순차적으로 파싱
+// 3. 각 파일의 메타데이터(이름, 크기 등)을 추출
+// 4. 파일 데이터를 메모리 내 파일 시스템 구조에 로드
+// 5. 모든 파일을 처리하거나 비어있는 헤더를 만나면 초기화 완료
+void fs_init(void) {
+  // 디스크 데이터 로드
+  for (unsigned sector = 0; sector < sizeof(disk) / SECTOR_SIZE; sector++)
+    read_write_disk(&disk[sector * SECTOR_SIZE], sector, false);
+
+  // TAR 파일 구조 파싱
+  unsigned off = 0;
+  for (int i = 0; i < FILES_MAX; i++) {
+
+    // TAR 파일 헤더 검사
+    struct tar_header *header = (struct tar_header *)&disk[off];
+    if (header->name[0] == '\0')
+      break;
+
+    // TAR 포맷 검증
+    if (strcmp(header->magic, "ustar") != 0)
+      PANIC("invalid tar header: magix=\"%s\"", header->magic);
+
+    // 파일 크기 추출 및 파일 정보 저장
+    int filesz = oct2int(header->size, sizeof(header->size));
+    struct file *file = &files[i];
+    file->in_use = true;
+    strcpy(file->name, header->name);
+    memcpy(file->data, header->data, filesz);
+    file->size = filesz;
+    printf("file: %s, size=%d\n", file->name, file->size);
+
+    // 다음 파일 헤더로 이동
+    off += align_up(sizeof(struct tar_header) + filesz, SECTOR_SIZE);
+  }
+}
+
 // 커널 메인 함수
 void kernel_main(void) {
   /* BSS 영역 초기화 (BSS 영역만큼 버퍼를 0으로 채움)
@@ -668,6 +825,7 @@ void kernel_main(void) {
   WRITE_CSR(stvec, (uint32_t)kernel_entry);
 
   virtio_blk_init();
+  fs_init();
 
   char buf[SECTOR_SIZE];
   read_write_disk(buf, 0, false /* read from the disk */);
