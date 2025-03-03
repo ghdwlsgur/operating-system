@@ -2,7 +2,10 @@
 #include "common.h"
 
 #define FILES_MAX 2
-#define DISK_MAX_SIZE align_up(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)
+// #define DISK_MAX_SIZE align_up(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)
+
+#define ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
+#define DISK_MAX_SIZE ALIGN_UP(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)
 
 // #define ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
 // #define DISK_MAX_SIZE ALIGN_UP(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)

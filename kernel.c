@@ -709,6 +709,62 @@ void fs_init(void) {
   }
 }
 
+// TAR 형식으로 파일 시스템을 구성하고 가상 블록 장치에 저장
+void fs_flush(void) {
+
+  // 모든 파일 내용을 'disk' 버퍼에 복사
+  memset(disk, 0, sizeof(disk));
+
+  // 현재 디스크 오프셋 위치를 추적
+  unsigned off = 0;
+
+  // 모든 파일을 순회하며 TAR 형식으로 디스크에 저장
+  for (int file_i = 0; file_i < FILES_MAX; file_i++) {
+    struct file *file = &files[file_i];
+    if (!file->in_use) // 사용중이지 않으면 건너뜀
+      continue;
+
+    // TAR 헤더 구성
+    struct tar_header *header = (struct tar_header *)&disk[off];
+    memset(header, 0, sizeof(*header));
+    strcpy(header->name, file->name);
+    strcpy(header->mode, "000644");
+    strcpy(header->magic, "ustar");
+    strcpy(header->version, "00");
+    header->type = '0';
+
+    // 파일 크기를 8진수 문자열로 변환하여 헤더에 설정
+    int filesz = file->size;
+    for (int i = sizeof(header->size); i > 0; i--) {
+      header->size[i - 1] = (filesz % 8) + '0';
+      filesz /= 8;
+    }
+
+    // 헤더 체크섬 계산
+    int checksum = ' ' * sizeof(header->checksum);
+    for (unsigned i = 0; i < sizeof(struct tar_header); i++)
+      checksum += (unsigned char)disk[off + i];
+
+    // 계산된 체크섬을 8진수 문자열로 변환하여 헤더에 설정
+    for (int i = 5; i >= 0; i--) {
+      header->checksum[i] = (checksum % 8) + '0';
+      checksum /= 8;
+    }
+
+    // 파일 데이터를 헤더 뒤에 복사
+    memcpy(header->data, file->data, file->size);
+
+    // 다음 파일을 위해 오프셋 업데이트 (섹터 크기에 맞게 정렬)
+    off += align_up(sizeof(struct tar_header) + file->size, SECTOR_SIZE);
+  }
+
+  // disk 버퍼의 내용을 virtio-blk 디바이스에 기록
+  for (unsigned sector = 0; sector < sizeof(disk) / SECTOR_SIZE; sector++)
+    read_write_disk(&disk[sector * SECTOR_SIZE], sector, true);
+
+  printf("wrote %d bytes to disk\n", sizeof(disk));
+}
+
 // 커널 메인 함수
 void kernel_main(void) {
   /* BSS 영역 초기화 (BSS 영역만큼 버퍼를 0으로 채움)
